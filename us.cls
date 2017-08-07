@@ -1,10 +1,15 @@
-public class US {
+public with sharing class  US {
     /*  God bless Am.. I mean Underscore.js
      * The purposes is to allow you to concentrate on logic vs. loops and other code clutter that 
      * clouds (har har) the actual work you are doing.
      */
 
     @testvisible List<SObject> objs;
+
+    private static FilterFieldEqualToValue default_filter_behavior_eq;
+    private static FilterFieldInValueCollection default_filter_behavior_col;
+    private static FilterCompareFieldToValue default_filter_behavior_cmp;
+
     Final List<SObject> original_objs;
     Boolean mutated;
     Integer i;
@@ -99,13 +104,18 @@ public class US {
     } 
 
     public class FilterFieldEqualToValue extends US.FilterInterfaceAbstract {
-        final private Object filter_val;
-        final private String filter_field;
+        private Object filter_val;
+        private String filter_field;
 
         public FilterFieldEqualToValue(String field, Object val){
+            set(field, val);
+        }
+
+        public void set(String field, Object val){
             filter_field = field;
             filter_val = val;
-        }
+          }
+
 
         public override boolean filterfn(List<SObject> memo, SObject value){
             return value.get(filter_field) == filter_val;
@@ -113,13 +123,17 @@ public class US {
     }
 
     public class FilterFieldInValueCollection extends US.FilterInterfaceAbstract {
-        final private Set<Object> filter_val;
-        final private String filter_field;
+        private Set<Object> filter_val;
+        private String filter_field;
 
         public FilterFieldInValueCollection(String field, Set<Object> val){
+          set(field, val);
+        }
+
+        public void set(String field, Set<Object> val){
             filter_field = field;
             filter_val = val;
-        }
+          }
 
         public override boolean filterfn(List<SObject> memo, SObject value){
             return filter_val.contains(value.get(filter_field));
@@ -127,24 +141,32 @@ public class US {
     }    
     
     public class FilterCompareFieldToValue extends US.FilterInterfaceAbstract {
-        final private Object filter_val;
-        final private String filter_field;
-        final private String filter_comparitor;
+        private Object filter_val;
+        private String filter_field;
+        private String filter_comparitor;
 
         public FilterCompareFieldToValue(String field, String comparitor, Object val){
+          set(field, comparitor, val);
+        }
+
+
+        public void set(String field, String comparitor, Object val){
             filter_field = field;
             filter_val = val;
             filter_comparitor = comparitor;
         }
 
+
         public override boolean filterfn(List<SObject> memo, SObject value){
-        Boolean gt = filter_comparitor == '>' || filter_comparitor == '>=';
-        Boolean lt = filter_comparitor == '<' || filter_comparitor == '<=';
-        Boolean eq = filter_comparitor == '==' || filter_comparitor == '<='  || filter_comparitor == '>=';
+            Boolean gt = filter_comparitor == '>' || filter_comparitor == '>=';
+            Boolean lt = filter_comparitor == '<' || filter_comparitor == '<=';
+            Boolean eq = filter_comparitor == '==' || filter_comparitor == '<='  || filter_comparitor == '>=';
 
             return filter_val instanceof Integer && (
                     (gt && (Integer) value.get(filter_field) > (Integer) filter_val) || (lt && (Integer) value.get(filter_field) < (Integer) filter_val) || (eq && (Integer) value.get(filter_field) == (Integer) filter_val)
-                ) || filter_val instanceof Decimal && (
+                )  || filter_val instanceof String && (
+                    (eq && (String) value.get(filter_field) == (String) filter_val)
+                )  || filter_val instanceof Decimal && (
                     (gt && (Decimal) value.get(filter_field) >  (Decimal) filter_val) || (lt && (Decimal) value.get(filter_field) <  (Decimal) filter_val) || (eq && (Decimal) value.get(filter_field) == (Decimal) filter_val)
                 ) || filter_val instanceof Date && (
                     (gt && (Date) value.get(filter_field) > (Date) filter_val) || (lt && (Date) value.get(filter_field) < (Date) filter_val) || (eq && (Date) value.get(filter_field) == (Date) filter_val)
@@ -477,6 +499,8 @@ public class US {
             List<SObject> memo = new List<SObject>();
             for (SObject value : lst){
                 if(!filterfn(memo, value)){
+                    system.debug(memo);
+                    system.debug(value);
                     memo.add(value);
                 }
             }
@@ -573,45 +597,76 @@ public class US {
     *
     */
 
+    public class InvalidComparatorException extends Exception {
+    
+    }
+
     public US filter(FilterInterfaceAbstract behavior){
         objs = behavior.filter(objs);
         return this;
     }
 
-    public US filter(String field, List<Object> val){
-        Set<Object> set_vals = new Set<Object>(val);
-        return filter(field, set_vals);
-    }
-
-    public US filter(String field, Set<Object> val){
-        FilterFieldInValueCollection behavior = new FilterFieldInValueCollection(field, val);
-        return filter(behavior);
-    }
-
     public US filter(String field, Object val){
-        FilterFieldEqualToValue behavior = new FilterFieldEqualToValue(field, val);
-        return filter(behavior);
-    }
+        if(val instanceof List<Object>){
+            val = new Set<Object>((List<Object>)val);
+        }
 
-    public class InvalidComparatorException extends Exception {
-    
+        if(val instanceof Set<Object>){
+            if (default_filter_behavior_col == null) 
+                default_filter_behavior_col = new FilterFieldInValueCollection(field, (Set<Object>) val);
+            else default_filter_behavior_col.set(field, (Set<Object>) val);
+            return filter(default_filter_behavior_col);
+        }
+        if (default_filter_behavior_eq == null) default_filter_behavior_eq = new FilterFieldEqualToValue(field, val);
+        else default_filter_behavior_eq.set(field, val);
+        return filter(default_filter_behavior_eq);
     }
 
     public US filter(String field, String comparitor, Object val){
-        Set<String> VALID_COMPARITORS = new Set<String>{'<', '>', '<=', '>=', '=='};
-      if (!VALID_COMPARITORS.contains(comparitor)){
-        throw new InvalidComparatorException();
-      }
-        FilterCompareFieldToValue behavior = new FilterCompareFieldToValue(field, comparitor, val);
-        return filter(behavior);
+        Set<String> VALID_COMPARITORS = new Set<String>{'<', '>', '<=', '>=', '=='}; // ()
+        if (!VALID_COMPARITORS.contains(comparitor)){
+          throw new InvalidComparatorException();
+        }
+        if (default_filter_behavior_cmp == null) default_filter_behavior_cmp = new FilterCompareFieldToValue(field, comparitor, val);
+        else default_filter_behavior_cmp.set(field, comparitor, val);
+        return filter(default_filter_behavior_cmp);
     }
-
 
     public US reject(FilterInterfaceAbstract behavior){
         objs = behavior.reject(objs);
         return this;
     }
 
+    public US reject(String field, Object val){
+
+        if(val instanceof List<Object>){
+            system.debug('List reject');
+            val = new Set<Object>((List<Object>)val);
+        }
+        
+        if(val instanceof Set<Object>){
+            system.debug('Set / List FilterFieldInValueCollection reject');
+			FilterFieldInValueCollection behavior = new FilterFieldInValueCollection(field, (Set<Object>) val);
+            return reject(behavior);
+        }
+
+        system.debug('Regular reject');
+        if (default_filter_behavior_eq == null) default_filter_behavior_eq = new FilterFieldEqualToValue(field, val);
+        else default_filter_behavior_eq.set(field, val);
+
+        return reject(default_filter_behavior_eq);
+    }
+
+    public US reject(String field, String comparitor, Object val){
+        Set<String> VALID_COMPARITORS = new Set<String>{'<', '>', '<=', '>=', '=='};
+        if (!VALID_COMPARITORS.contains(comparitor)){
+          throw new InvalidComparatorException();
+        }
+        if (default_filter_behavior_cmp == null) default_filter_behavior_cmp = new FilterCompareFieldToValue(field, comparitor, val);
+        else default_filter_behavior_cmp.set(field, comparitor, val);
+        return reject(default_filter_behavior_cmp);
+    }
+    
     public Boolean every(FilterInterfaceAbstract behavior){
         return behavior.every(objs);
     }
@@ -752,6 +807,10 @@ public class US {
         return this;
     }
 
+    public Integer size(){
+        return objs.size();
+    }
+    
     public US(List<SObject> items){
         objs = items;
         original_objs = items;
